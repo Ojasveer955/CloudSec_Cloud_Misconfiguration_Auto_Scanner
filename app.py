@@ -13,48 +13,77 @@ from scanner.check_storage_encryption import check_storage_encryption
 from scanner.check_vms import list_vms_with_public_ip
 from scanner.check_nsg import check_open_nsg_rules
 from scanner.check_function_apps import check_unrestricted_function_apps
+
+# AWS modules
+from scanner.utils_aws import aws_creds_ok
+from scanner.inventory_aws import list_s3_buckets
+from scanner.checks_aws_s3 import check_s3_public_access
+
 from db import dao
 
-# ------------- SCAN ENGINE (parallel) -------------
+# ------------- AWS SCAN (parallel) -------------
+def list_s3_buckets_wrapper():
+    """Wrapper to handle AWS not configured gracefully"""
+    if not aws_creds_ok():
+        return []  # Skip AWS if not configured
+    try:
+        return list_s3_buckets()
+    except Exception as e:
+        print(f"AWS S3 scan skipped: {e}")
+        return []
+
+
 def run_all_checks():
     findings = []
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = {
-            executor.submit(list_storage_accounts): "storage",
-            executor.submit(list_vms_with_public_ip): "vms",
-            executor.submit(check_open_nsg_rules): "nsgs",
-            executor.submit(check_unrestricted_function_apps): "functionapps",
+            # Azure checks
+            executor.submit(list_storage_accounts): "azure_storage",
+            executor.submit(list_vms_with_public_ip): "azure_vms",
+            executor.submit(check_open_nsg_rules): "azure_nsgs",
+            executor.submit(check_unrestricted_function_apps): "azure_functionapps",
+            # AWS checks
+            executor.submit(list_s3_buckets_wrapper): "aws_s3",
         }
         for future in concurrent.futures.as_completed(futures):
             service = futures[future]
             try:
                 result = future.result()
-                if service == "storage":
+                if service == "azure_storage":
                     findings += check_storage_public_blob_access(result)
                     findings += check_storage_encryption(result)
+                elif service == "aws_s3":
+                    if result:  # Only check if buckets were returned
+                        findings += check_s3_public_access(result)
                 else:
                     findings += result
             except Exception as e:
-                findings.append({
-                    "rule_id": "ERROR",
-                    "service": service,
-                    "title": f"Error scanning {service}",
-                    "severity": "Low",
-                    "resource_id": "-",
-                    "evidence": str(e),
-                    "remediation": []
-                })
+                findings.append(
+                    {
+                        "rule_id": "ERROR",
+                        "service": service,
+                        "title": f"Error scanning {service}",
+                        "severity": "Low",
+                        "resource_id": "-",
+                        "evidence": str(e),
+                        "remediation": [],
+                    }
+                )
     return findings
+
 
 # ------------- UI PAGES -----------------
 def landing_page():
-    st.title("☁️ Azure Misconfiguration Auto Scanner")
-    st.markdown("""
+    st.title("☁️ Multi-Cloud Misconfiguration Auto Scanner")
+    st.markdown(
+        """
     ## 🔐 Welcome!
-    A **next-gen CSPM-lite tool** to automatically detect misconfigurations in your Azure cloud.
+    A **next-gen CSPM-lite tool** to automatically detect misconfigurations in your Azure and AWS cloud environments.
     
     ### 🚀 Features:
-    - Fast **parallel scans** across Azure resources
+    - Fast **parallel scans** across Azure and AWS resources
+    - **Azure**: Storage Accounts, VMs, NSGs, Function Apps
+    - **AWS**: S3 Buckets (public access detection)
     - Smart **SQLite persistence** (trend history)
     - Intuitive **Findings Explorer** with filters & search
     - Beautiful **charts** & KPIs for risk posture
@@ -63,7 +92,8 @@ def landing_page():
     - 🤖 **GenAI Assistant** (explain findings in plain English, coming soon)
 
     ---
-    """)
+    """
+    )
     if st.button("🔥 Run Quick Scan Now"):
         run_id = dao.start_run()
         with st.spinner("Running parallel scan..."):
@@ -72,6 +102,7 @@ def landing_page():
             dao.finish_run(run_id)
         st.success(f"✅ Scan finished with {len(findings)} findings.")
         st.json(findings)
+
 
 def dashboard_page():
     import pandas as pd
@@ -106,7 +137,7 @@ def dashboard_page():
         values=[highs, meds, lows],
         title="Findings by Severity",
         color=["High", "Medium", "Low"],
-        color_discrete_map={"High":"red","Medium":"orange","Low":"green"}
+        color_discrete_map={"High": "red", "Medium": "orange", "Low": "green"},
     )
     st.plotly_chart(fig)
 
@@ -123,7 +154,7 @@ def dashboard_page():
             y="findings",
             text="findings",
             markers=True,
-            title="Findings per Run Over Time"
+            title="Findings per Run Over Time",
         )
         st.plotly_chart(line)
     else:
@@ -132,6 +163,7 @@ def dashboard_page():
 
 def findings_page():
     import pandas as pd
+
     st.header("📑 Findings Explorer")
     findings = dao.get_all_findings()
     if not findings:
@@ -176,6 +208,7 @@ def findings_page():
     # Show a full-width table with wrapped evidence and remediation
     if not filtered.empty:
         import html
+
         def format_evidence(ev):
             if isinstance(ev, dict):
                 return html.escape(json.dumps(ev, indent=2, ensure_ascii=False))
@@ -183,12 +216,33 @@ def findings_page():
 
         def format_remediation(rem):
             if isinstance(rem, list):
-                return "<ul>" + "".join(f"<li>{html.escape(str(r))}</li>" for r in rem) + "</ul>"
+                return (
+                    "<ul>"
+                    + "".join(f"<li>{html.escape(str(r))}</li>" for r in rem)
+                    + "</ul>"
+                )
             return html.escape(str(rem))
 
         # Build HTML table
-        table_html = "<table style='width:100%;table-layout:fixed;word-break:break-word;'>"
-        table_html += "<tr>" + "".join(f"<th>{col}</th>" for col in ["Rule ID", "Service", "Title", "Severity", "Resource", "Evidence", "Remediation"]) + "</tr>"
+        table_html = (
+            "<table style='width:100%;table-layout:fixed;word-break:break-word;'>"
+        )
+        table_html += (
+            "<tr>"
+            + "".join(
+                f"<th>{col}</th>"
+                for col in [
+                    "Rule ID",
+                    "Service",
+                    "Title",
+                    "Severity",
+                    "Resource",
+                    "Evidence",
+                    "Remediation",
+                ]
+            )
+            + "</tr>"
+        )
         for _, row in filtered.iterrows():
             table_html += "<tr>"
             table_html += f"<td>{html.escape(str(row['rule_id']))}</td>"
@@ -211,8 +265,10 @@ def database_page():
     st.write("Raw DB contents:")
     st.json(findings)
 
+
 from reports.generate_report import generate_report
 import os
+
 
 def reports_page():
     st.header("📝 Reports")
@@ -243,7 +299,13 @@ def main():
     with st.sidebar:
         selected = option_menu(
             "Navigation",
-            ["Landing Page", "Dashboard", "Findings Explorer", "Database Browser", "Reports"],
+            [
+                "Landing Page",
+                "Dashboard",
+                "Findings Explorer",
+                "Database Browser",
+                "Reports",
+            ],
             icons=["house", "bar-chart", "search", "database", "file-earmark-text"],
             menu_icon="cast",
             default_index=0,
@@ -258,6 +320,7 @@ def main():
         database_page()
     elif selected == "Reports":
         reports_page()
+
 
 if __name__ == "__main__":
     main()
