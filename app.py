@@ -20,6 +20,7 @@ from scanner.inventory_aws import list_s3_buckets
 from scanner.checks_aws_s3 import check_s3_public_access
 
 from db import dao
+from scanner.utils import creds_ok, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
 
 # ------------- AWS SCAN (parallel) -------------
 def list_s3_buckets_wrapper():
@@ -33,23 +34,91 @@ def list_s3_buckets_wrapper():
         return []
 
 
-def run_all_checks():
+def validate_azure_credentials():
+    """Validate Azure credentials by attempting a lightweight API call.
+
+    Returns:
+        (bool, str): (is_valid, message)
+    """
+    if not creds_ok():
+        return False, "Azure credentials missing. Please set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, and AZURE_SUBSCRIPTION_ID in your .env or environment."
+    try:
+        # Import here to avoid failing when azure libs are not installed for other flows
+        from azure.identity import ClientSecretCredential
+        from azure.mgmt.resource import SubscriptionClient
+
+        cred = ClientSecretCredential(
+            tenant_id=AZURE_TENANT_ID, client_id=AZURE_CLIENT_ID, client_secret=AZURE_CLIENT_SECRET
+        )
+        sub_client = SubscriptionClient(cred)
+        # Attempt a small call to validate credentials
+        _ = next(sub_client.subscriptions.list())
+        return True, "Azure credentials appear valid."
+    except StopIteration:
+        # Account has no subscriptions but auth succeeded
+        return True, "Azure authentication successful (no subscriptions found)."
+    except Exception as e:
+        return False, f"Azure authentication failed: {e}"
+
+
+def validate_aws_credentials():
+    """Validate AWS credentials by calling STS GetCallerIdentity.
+
+    Returns:
+        (bool, str): (is_valid, message)
+    """
+    if not aws_creds_ok():
+        return False, "AWS credentials missing. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in your .env or environment."
+    try:
+        # Use existing utility to get a client
+        sts = None
+        try:
+            sts = __import__("scanner.utils_aws", fromlist=["get_aws_client"]).get_aws_client("sts")
+        except Exception:
+            # fallback to boto3 directly
+            import boto3
+
+            sts = boto3.client("sts")
+        sts.get_caller_identity()
+        return True, "AWS credentials appear valid."
+    except Exception as e:
+        return False, f"AWS authentication failed: {e}"
+
+
+def run_all_checks(scan_azure: bool = True, scan_aws: bool = False):
+    """Run selected scans in parallel.
+
+    Args:
+        scan_azure: whether to include Azure scans (storage, vms, nsgs, functionapps)
+        scan_aws: whether to include AWS scans (s3)
+
+    Returns:
+        list of findings
+    """
     findings = []
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {
-            # Azure checks
-            executor.submit(list_storage_accounts): "azure_storage",
-            executor.submit(list_vms_with_public_ip): "azure_vms",
-            executor.submit(check_open_nsg_rules): "azure_nsgs",
-            executor.submit(check_unrestricted_function_apps): "azure_functionapps",
-            # AWS checks
-            executor.submit(list_s3_buckets_wrapper): "aws_s3",
-        }
+        futures = {}
+
+        # Schedule Azure checks only if requested
+        if scan_azure:
+            futures[executor.submit(list_storage_accounts)] = "storage"
+            futures[executor.submit(list_vms_with_public_ip)] = "vms"
+            futures[executor.submit(check_open_nsg_rules)] = "nsgs"
+            futures[executor.submit(check_unrestricted_function_apps)] = "functionapps"
+
+        # Schedule AWS checks only if requested
+        if scan_aws:
+            futures[executor.submit(list_s3_buckets_wrapper)] = "aws_s3"
+
+        # If nothing selected, return empty findings
+        if not futures:
+            return findings
+
         for future in concurrent.futures.as_completed(futures):
             service = futures[future]
             try:
                 result = future.result()
-                if service == "azure_storage":
+                if service == "storage":
                     findings += check_storage_public_blob_access(result)
                     findings += check_storage_encryption(result)
                 elif service == "aws_s3":
@@ -94,14 +163,46 @@ def landing_page():
     ---
     """
     )
+    # Let user choose which cloud(s) to scan
+    col_a, col_b = st.columns(2)
+    with col_a:
+        scan_azure = st.checkbox("Scan Azure", value=True)
+    with col_b:
+        scan_aws = st.checkbox("Scan AWS", value=False)
+
     if st.button("🔥 Run Quick Scan Now"):
-        run_id = dao.start_run()
-        with st.spinner("Running parallel scan..."):
-            findings = run_all_checks()
-            dao.save_findings(run_id, findings)
-            dao.finish_run(run_id)
-        st.success(f"✅ Scan finished with {len(findings)} findings.")
-        st.json(findings)
+        if not scan_azure and not scan_aws:
+            st.warning("No cloud selected. Please select at least one cloud to scan.")
+        else:
+            # Validate credentials for selected clouds and show UI messages if missing/invalid
+            invalid = False
+            if scan_azure:
+                ok, msg = validate_azure_credentials()
+                if not ok:
+                    st.error(f"Azure credential error: {msg}")
+                    invalid = True
+            if scan_aws:
+                ok, msg = validate_aws_credentials()
+                if not ok:
+                    st.error(f"AWS credential error: {msg}")
+                    invalid = True
+
+            if invalid:
+                st.info("Fix credentials or uncheck the cloud you don't want to scan, then try again.")
+            else:
+                run_id = dao.start_run()
+                clouds = []
+                if scan_azure:
+                    clouds.append("Azure")
+                if scan_aws:
+                    clouds.append("AWS")
+                spinner_msg = f"Running parallel scan for: {', '.join(clouds)}..."
+                with st.spinner(spinner_msg):
+                    findings = run_all_checks(scan_azure=scan_azure, scan_aws=scan_aws)
+                    dao.save_findings(run_id, findings)
+                    dao.finish_run(run_id)
+                st.success(f"Scan finished with {len(findings)} findings.")
+                st.json(findings)
 
 
 def dashboard_page():
