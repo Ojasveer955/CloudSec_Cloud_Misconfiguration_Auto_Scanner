@@ -3,7 +3,14 @@
 
 from azure.identity import ClientSecretCredential
 from azure.mgmt.network import NetworkManagementClient
-from scanner.utils import AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, creds_ok
+from scanner.utils import (
+    AZURE_CLIENT_ID,
+    AZURE_CLIENT_SECRET,
+    AZURE_TENANT_ID,
+    AZURE_SUBSCRIPTION_ID,
+    creds_ok,
+)
+
 
 def _cred():
     if not creds_ok():
@@ -11,8 +18,9 @@ def _cred():
     return ClientSecretCredential(
         tenant_id=AZURE_TENANT_ID,
         client_id=AZURE_CLIENT_ID,
-        client_secret=AZURE_CLIENT_SECRET
+        client_secret=AZURE_CLIENT_SECRET,
     )
+
 
 def check_open_nsg_rules():
     cred = _cred()
@@ -30,20 +38,22 @@ def check_open_nsg_rules():
                         "rule_name": rule.name,
                         "source_address_prefix": src,
                         "destination_port_range": port,
-                        "resource_id": nsg.id
-                    }
-                    findings.append({
-                        "rule_id": "AZ-NSG-OPEN-001",
-                        "service": "NetworkSecurityGroup",
                         "resource_id": nsg.id,
-                        "nsg_name": nsg.name,
-                        "rule_name": rule.name,
-                        "title": f"NSG allows {src} to port {port}",
-                        "severity": "High",
-                        "evidence": evidence,
-                        "remediation": [
-                            f"Restrict NSG rule {rule.name} on {nsg.name} to only trusted IP ranges.",
-                            "Use Just-In-Time access or Azure Bastion for admin access."
-                        ]
-                    })
+                    }
+                    findings.append(
+                        {
+                            "rule_id": "AZ-NSG-OPEN-001",
+                            "service": "NetworkSecurityGroup",
+                            "resource_id": nsg.id,
+                            "nsg_name": nsg.name,
+                            "rule_name": rule.name,
+                            "title": f"NSG allows {src} to port {port}",
+                            "severity": "High",
+                            "evidence": evidence,
+                            "remediation": [
+                                f"Restrict NSG rule {rule.name} on {nsg.name} to only trusted IP ranges.",
+                                "Use Just-In-Time access or Azure Bastion for admin access.",
+                            ],
+                        }
+                    )
     return findings

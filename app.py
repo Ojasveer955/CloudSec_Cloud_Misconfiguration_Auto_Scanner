@@ -20,7 +20,14 @@ from scanner.inventory_aws import list_s3_buckets
 from scanner.checks_aws_s3 import check_s3_public_access
 
 from db import dao
-from scanner.utils import creds_ok, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+from scanner.utils import (
+    creds_ok,
+    AZURE_CLIENT_ID,
+    AZURE_CLIENT_SECRET,
+    AZURE_TENANT_ID,
+    AZURE_SUBSCRIPTION_ID,
+)
+
 
 # ------------- AWS SCAN (parallel) -------------
 def list_s3_buckets_wrapper():
@@ -41,14 +48,19 @@ def validate_azure_credentials():
         (bool, str): (is_valid, message)
     """
     if not creds_ok():
-        return False, "Azure credentials missing. Please set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, and AZURE_SUBSCRIPTION_ID in your .env or environment."
+        return (
+            False,
+            "Azure credentials missing. Please set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, and AZURE_SUBSCRIPTION_ID in your .env or environment.",
+        )
     try:
         # Import here to avoid failing when azure libs are not installed for other flows
         from azure.identity import ClientSecretCredential
         from azure.mgmt.resource import SubscriptionClient
 
         cred = ClientSecretCredential(
-            tenant_id=AZURE_TENANT_ID, client_id=AZURE_CLIENT_ID, client_secret=AZURE_CLIENT_SECRET
+            tenant_id=AZURE_TENANT_ID,
+            client_id=AZURE_CLIENT_ID,
+            client_secret=AZURE_CLIENT_SECRET,
         )
         sub_client = SubscriptionClient(cred)
         # Attempt a small call to validate credentials
@@ -68,12 +80,17 @@ def validate_aws_credentials():
         (bool, str): (is_valid, message)
     """
     if not aws_creds_ok():
-        return False, "AWS credentials missing. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in your .env or environment."
+        return (
+            False,
+            "AWS credentials missing. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in your .env or environment.",
+        )
     try:
         # Use existing utility to get a client
         sts = None
         try:
-            sts = __import__("scanner.utils_aws", fromlist=["get_aws_client"]).get_aws_client("sts")
+            sts = __import__(
+                "scanner.utils_aws", fromlist=["get_aws_client"]
+            ).get_aws_client("sts")
         except Exception:
             # fallback to boto3 directly
             import boto3
@@ -188,7 +205,9 @@ def landing_page():
                     invalid = True
 
             if invalid:
-                st.info("Fix credentials or uncheck the cloud you don't want to scan, then try again.")
+                st.info(
+                    "Fix credentials or uncheck the cloud you don't want to scan, then try again."
+                )
             else:
                 run_id = dao.start_run()
                 clouds = []
@@ -222,7 +241,9 @@ def dashboard_page():
     lows = sum(1 for f in findings if f["severity"] == "Low")
 
     # Highlight storage encryption findings
-    encryption_findings = [f for f in findings if f["rule_id"] == "AZ-Storage-Encryption-001"]
+    encryption_findings = [
+        f for f in findings if f["rule_id"] == "AZ-Storage-Encryption-001"
+    ]
     if encryption_findings:
         st.info(f"🔒 {len(encryption_findings)} Storage Accounts missing encryption!")
 

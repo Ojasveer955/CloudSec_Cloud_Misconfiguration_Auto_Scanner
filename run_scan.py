@@ -7,6 +7,7 @@ from scanner.check_nsg import check_open_nsg_rules
 from scanner.check_function_apps import check_unrestricted_function_apps
 import json
 
+
 def run():
     findings = []
 
@@ -35,16 +36,17 @@ def run():
             print(f"Severity: {f.get('severity')}")
             print(f"Resource: {f.get('resource_name', f.get('resource_id'))}")
             print("Evidence:")
-            print(json.dumps(f.get('evidence'), indent=2, ensure_ascii=False))
+            print(json.dumps(f.get("evidence"), indent=2, ensure_ascii=False))
             print("Remediation:")
-            if isinstance(f.get('remediation'), list):
-                for r in f.get('remediation'):
+            if isinstance(f.get("remediation"), list):
+                for r in f.get("remediation"):
                     print(f"- {r}")
             else:
-                print(f.get('remediation'))
+                print(f.get("remediation"))
         print("\n------------------------------")
     else:
         print("No findings detected.")
+
 
 if __name__ == "__main__":
     run()

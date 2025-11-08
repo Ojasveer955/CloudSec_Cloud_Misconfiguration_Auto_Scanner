@@ -4,6 +4,7 @@ from db import dao
 from datetime import datetime
 import os
 
+
 def generate_report(output_name="azure_report.pdf", run_id=None):
     # Ensure export folder exists
     export_dir = os.path.join("reports", "exports")
@@ -30,7 +31,7 @@ def generate_report(output_name="azure_report.pdf", run_id=None):
         high=high,
         medium=medium,
         low=low,
-        findings=findings
+        findings=findings,
     )
 
     # Save HTML for debugging
@@ -47,6 +48,6 @@ def generate_report(output_name="azure_report.pdf", run_id=None):
 
 if __name__ == "__main__":
     from datetime import datetime
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     generate_report(f"azure_report_{timestamp}.pdf")
-

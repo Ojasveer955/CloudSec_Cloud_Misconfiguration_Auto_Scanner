@@ -4,7 +4,14 @@
 from azure.identity import ClientSecretCredential
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
-from scanner.utils import AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, creds_ok
+from scanner.utils import (
+    AZURE_CLIENT_ID,
+    AZURE_CLIENT_SECRET,
+    AZURE_TENANT_ID,
+    AZURE_SUBSCRIPTION_ID,
+    creds_ok,
+)
+
 
 def _credential():
     if not creds_ok():
@@ -12,8 +19,9 @@ def _credential():
     return ClientSecretCredential(
         tenant_id=AZURE_TENANT_ID,
         client_id=AZURE_CLIENT_ID,
-        client_secret=AZURE_CLIENT_SECRET
+        client_secret=AZURE_CLIENT_SECRET,
     )
+
 
 def list_vms_with_public_ip():
     cred = _credential()
@@ -46,20 +54,22 @@ def list_vms_with_public_ip():
             evidence = {
                 "vm_name": vm_name,
                 "resource_id": vm.id,
-                "public_ips": vm_public_ips
-            }
-            findings.append({
-                "rule_id": "AZ-VM-PUBIP-001",
-                "service": "VirtualMachine",
-                "vm_name": vm_name,
-                "resource_id": vm.id,
                 "public_ips": vm_public_ips,
-                "title": "VM has public IP(s)",
-                "severity": "Medium",
-                "evidence": evidence,
-                "remediation": [
-                    "Remove public IP from NIC if not required",
-                    "Use Azure Bastion or VPN instead of public IP"
-                ]
-            })
+            }
+            findings.append(
+                {
+                    "rule_id": "AZ-VM-PUBIP-001",
+                    "service": "VirtualMachine",
+                    "vm_name": vm_name,
+                    "resource_id": vm.id,
+                    "public_ips": vm_public_ips,
+                    "title": "VM has public IP(s)",
+                    "severity": "Medium",
+                    "evidence": evidence,
+                    "remediation": [
+                        "Remove public IP from NIC if not required",
+                        "Use Azure Bastion or VPN instead of public IP",
+                    ],
+                }
+            )
     return findings
